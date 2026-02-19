@@ -998,7 +998,7 @@ export default function Properties() {
         </div>
       ) : (
         <div className="space-y-4">
-          {properties.map((p) => {
+          {properties.filter((p) => p.id !== editing?.id).map((p) => {
             const allocated = p.land_value + p.building_value + p.furniture_value + p.acquisition_costs;
             const landPct = p.total_price > 0 ? (p.land_value / p.total_price) * 100 : 0;
             const isComplete = Math.abs(p.total_price - allocated) < 1 && allocated > 0;
