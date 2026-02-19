@@ -1,0 +1,73 @@
+{
+  "description": "Propriétaire d'un studio à Paris, acheté en 2022, loué depuis jan 2023",
+  "property": {
+    "name": "Studio Oberkampf",
+    "address": "42 rue Oberkampf, 75011 Paris",
+    "acquisition_date": "2022-06-15",
+    "total_price": 180000,
+    "land_value": 27000,
+    "building_value": 126000,
+    "furniture_value": 18000,
+    "acquisition_costs": 9000
+  },
+  "fiscal_year": 2025,
+  "revenues": [
+    {"month": 1, "amount": 850, "type": "loyer"},
+    {"month": 2, "amount": 850, "type": "loyer"},
+    {"month": 3, "amount": 850, "type": "loyer"},
+    {"month": 4, "amount": 850, "type": "loyer"},
+    {"month": 5, "amount": 850, "type": "loyer"},
+    {"month": 6, "amount": 900, "type": "loyer"},
+    {"month": 7, "amount": 900, "type": "loyer"},
+    {"month": 8, "amount": 900, "type": "loyer"},
+    {"month": 9, "amount": 900, "type": "loyer"},
+    {"month": 10, "amount": 900, "type": "loyer"},
+    {"month": 11, "amount": 900, "type": "loyer"},
+    {"month": 12, "amount": 900, "type": "loyer"}
+  ],
+  "expenses": [
+    {"date": "2025-01-15", "amount": 3200, "category": "loan_interest", "description": "Intérêts emprunt jan-déc"},
+    {"date": "2025-03-10", "amount": 850, "category": "property_tax", "description": "Taxe foncière 2025"},
+    {"date": "2025-06-01", "amount": 420, "category": "insurance", "description": "Assurance PNO"},
+    {"date": "2025-09-15", "amount": 1200, "category": "maintenance", "description": "Remplacement chauffe-eau"},
+    {"date": "2025-12-01", "amount": 380, "category": "management_fees", "description": "Frais agence T4"}
+  ],
+  "depreciations": [
+    {
+      "component": "structure",
+      "component_label": "Structure / Gros œuvre",
+      "value": 126000,
+      "duration_years": 50,
+      "start_date": "2022-06-15",
+      "expected_annual": 2520.0
+    },
+    {
+      "component": "furniture",
+      "component_label": "Mobilier",
+      "value": 18000,
+      "duration_years": 10,
+      "start_date": "2022-06-15",
+      "expected_annual": 1800.0
+    },
+    {
+      "component": "acquisition_costs",
+      "component_label": "Frais d'acquisition",
+      "value": 9000,
+      "duration_years": 5,
+      "start_date": "2022-06-15",
+      "expected_annual": 1800.0
+    }
+  ],
+  "expected_results": {
+    "total_revenue": 10600,
+    "total_expenses": 6050,
+    "result_before_depreciation": 4550,
+    "annual_depreciation_building": 2520,
+    "annual_depreciation_furniture": 1800,
+    "annual_depreciation_costs": 1800,
+    "total_annual_depreciation": 6120,
+    "total_deductible_depreciation": 4550,
+    "fiscal_result": 0,
+    "carried_over_depreciation": 1570
+  }
+}

@@ -1,0 +1,121 @@
+version: "2026"
+
+micro_bic:
+  standard_threshold: 77700
+  tourism_classified_threshold: 188700
+  tourism_unclassified_threshold: 15000
+  standard_abatement: 0.50
+  tourism_classified_abatement: 0.71
+  tourism_unclassified_abatement: 0.30
+
+depreciation:
+  land_deductible: false
+  components:
+    structure:
+      label: "Structure / Gros œuvre"
+      min_years: 50
+      max_years: 80
+      default_years: 50
+    roof:
+      label: "Toiture"
+      min_years: 20
+      max_years: 30
+      default_years: 25
+    facade:
+      label: "Façades / Ravalement"
+      min_years: 20
+      max_years: 30
+      default_years: 30
+    equipment:
+      label: "Équipements / Installations"
+      min_years: 10
+      max_years: 15
+      default_years: 10
+    furniture:
+      label: "Mobilier"
+      min_years: 5
+      max_years: 10
+      default_years: 7
+    acquisition_costs:
+      label: "Frais d'acquisition"
+      min_years: 5
+      max_years: 10
+      default_years: 5
+
+expense_categories:
+  loan_interest:
+    label: "Intérêts d'emprunt"
+    account: "661"
+    cgi_ref: "art. 39-1-3° CGI"
+  management_fees:
+    label: "Frais de gestion locative"
+    account: "622"
+    cgi_ref: "art. 39-1-1° CGI"
+  insurance:
+    label: "Primes d'assurance"
+    account: "616"
+    cgi_ref: "art. 39-1-1° CGI"
+  property_tax:
+    label: "Taxe foncière"
+    account: "635"
+    cgi_ref: "art. 39-1-4° CGI"
+  copropriety:
+    label: "Charges de copropriété (non récupérables)"
+    account: "614"
+    cgi_ref: "art. 39-1-1° CGI"
+  maintenance:
+    label: "Travaux d'entretien et réparation"
+    account: "615"
+    cgi_ref: "art. 39-1-1° CGI"
+  accounting_fees:
+    label: "Frais de comptabilité / CGA"
+    account: "622"
+    cgi_ref: "art. 39-1-1° CGI"
+  cfe:
+    label: "Cotisation Foncière des Entreprises (CFE)"
+    account: "635"
+    cgi_ref: "art. 39-1-4° CGI"
+  misc_management:
+    label: "Frais divers de gestion"
+    account: "627"
+    cgi_ref: "art. 39-1-1° CGI"
+
+cerfa:
+  forms:
+    - id: "2031"
+      name: "Déclaration de résultats BIC"
+      version: "2026"
+      cerfa_number: "11085"
+    - id: "2033-A"
+      name: "Bilan simplifié"
+      version: "2026"
+      cerfa_number: "10956"
+    - id: "2033-B"
+      name: "Compte de résultat simplifié"
+      version: "2026"
+      cerfa_number: "10957"
+    - id: "2033-C"
+      name: "Immobilisations et amortissements"
+      version: "2026"
+      cerfa_number: "10958"
+    - id: "2033-D"
+      name: "Provisions et amortissements dérogatoires"
+      version: "2026"
+      cerfa_number: "10959"
+    - id: "2033-E"
+      name: "Détermination de la valeur ajoutée"
+      version: "2026"
+      cerfa_number: "10960"
+    - id: "2033-F"
+      name: "Composition du capital"
+      version: "2026"
+      cerfa_number: "10961"
+    - id: "2033-G"
+      name: "Filiales et participations"
+      version: "2026"
+      cerfa_number: "10962"
+
+filing:
+  deadline_resident: "2026-05-15"
+  deadline_non_resident: "2026-06-01"
+  tax_office_portal: "https://www.impots.gouv.fr"

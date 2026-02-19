@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  backend:
+    build: ./backend
+    container_name: lmnp-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=sqlite:////data/lmnp.db
+      - FISCAL_CONSTANTS_PATH=/app/fiscal_constants
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - lmnp_data:/data
+      - ./fiscal_constants:/app/fiscal_constants:ro
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: lmnp-frontend
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  lmnp_data:
+    driver: local

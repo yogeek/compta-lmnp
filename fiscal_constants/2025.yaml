@@ -1,0 +1,76 @@
+version: "2025"
+
+micro_bic:
+  standard_threshold: 77700
+  tourism_classified_threshold: 188700
+  tourism_unclassified_threshold: 15000
+  standard_abatement: 0.50
+  tourism_classified_abatement: 0.71
+  tourism_unclassified_abatement: 0.30
+
+depreciation:
+  land_deductible: false
+  components:
+    structure:
+      label: "Structure / Gros œuvre"
+      min_years: 50
+      max_years: 80
+      default_years: 50
+    roof:
+      label: "Toiture"
+      min_years: 20
+      max_years: 30
+      default_years: 25
+    facade:
+      label: "Façades / Ravalement"
+      min_years: 20
+      max_years: 30
+      default_years: 30
+    equipment:
+      label: "Équipements / Installations"
+      min_years: 10
+      max_years: 15
+      default_years: 10
+    furniture:
+      label: "Mobilier"
+      min_years: 5
+      max_years: 10
+      default_years: 7
+    acquisition_costs:
+      label: "Frais d'acquisition"
+      min_years: 5
+      max_years: 10
+      default_years: 5
+
+expense_categories:
+  loan_interest:
+    label: "Intérêts d'emprunt"
+    account: "661"
+  management_fees:
+    label: "Frais de gestion locative"
+    account: "622"
+  insurance:
+    label: "Primes d'assurance"
+    account: "616"
+  property_tax:
+    label: "Taxe foncière"
+    account: "635"
+  copropriety:
+    label: "Charges de copropriété (non récupérables)"
+    account: "614"
+  maintenance:
+    label: "Travaux d'entretien et réparation"
+    account: "615"
+  accounting_fees:
+    label: "Frais de comptabilité / CGA"
+    account: "622"
+  cfe:
+    label: "CFE"
+    account: "635"
+  misc_management:
+    label: "Frais divers de gestion"
+    account: "627"
+
+filing:
+  deadline_resident: "2025-05-15"
+  deadline_non_resident: "2025-06-01"
