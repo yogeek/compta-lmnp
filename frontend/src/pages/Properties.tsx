@@ -639,13 +639,14 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
     }
   };
 
-  // Fill the remaining unallocated amount into a given field
+  // Fill (or trim) a field by the remaining unallocated amount.
+  // Works both ways: adds remainder when under budget, subtracts excess when over.
   const fillRemaining = (
     key: keyof typeof pctValues,
     formField: "land_value" | "building_value" | "furniture_value" | "acquisition_costs"
   ) => {
     const currentVal = watch(formField) || 0;
-    const newVal = Math.round((currentVal + remaining) * 100) / 100;
+    const newVal = Math.max(0, Math.round((currentVal + remaining) * 100) / 100);
     setValue(formField, newVal, { shouldValidate: true });
     if (pctMode && totalPrice > 0) {
       setPctValues((prev) => ({
@@ -760,14 +761,25 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
             )}
 
             {/* Fill-remaining button */}
-            {!disabled && remaining > 0.01 && totalPrice > 0 && (
+            {!disabled && Math.abs(remaining) > 0.01 && totalPrice > 0 &&
+              (remaining > 0 || (watch(field) || 0) + remaining >= 0) && (
               <button
                 type="button"
                 onClick={() => fillRemaining(key, field)}
-                className="mt-1.5 text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5 leading-tight"
-                title={`Affecter les ${formatEuro(remaining)} non ventilés à ce composant`}
+                className={`mt-1.5 text-xs font-medium flex items-center gap-0.5 leading-tight ${
+                  remaining > 0
+                    ? "text-primary-600 hover:text-primary-800"
+                    : "text-red-600 hover:text-red-800"
+                }`}
+                title={
+                  remaining > 0
+                    ? `Affecter les ${formatEuro(remaining)} non ventilés à ce composant`
+                    : `Réduire ce composant de ${formatEuro(-remaining)} pour revenir exactement au prix total`
+                }
               >
-                ↑ Affecter le solde (+{formatEuro(remaining)})
+                {remaining > 0
+                  ? `↑ Affecter le solde (+${formatEuro(remaining)})`
+                  : `↓ Retirer l'excédent (−${formatEuro(-remaining)})`}
               </button>
             )}
 
