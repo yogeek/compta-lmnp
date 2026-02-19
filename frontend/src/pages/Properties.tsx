@@ -126,6 +126,18 @@ function PriceContextPanel({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Retry once on network errors (TypeError) — first call often fails due to
+  // cold TCP/TLS connection establishment to CEREMA preprod server
+  const fetchWithRetry = async (url: string): Promise<Response> => {
+    try {
+      return await fetch(url);
+    } catch {
+      // Short pause then retry once
+      await new Promise((r) => setTimeout(r, 400));
+      return fetch(url);
+    }
+  };
+
   const fetchDvf = async () => {
     if (!codePostal) return;
     setDvfLoading(true);
@@ -134,7 +146,7 @@ function PriceContextPanel({
     setShowTable(true);
     try {
       // Step 1: resolve postal code → INSEE commune code via geo.api.gouv.fr
-      const geoRes = await fetch(
+      const geoRes = await fetchWithRetry(
         `https://geo.api.gouv.fr/communes?codePostal=${codePostal}&fields=code,nom`
       );
       if (!geoRes.ok) throw new Error(`geo API HTTP ${geoRes.status}`);
@@ -157,7 +169,7 @@ function PriceContextPanel({
       const surfParams = surf > 0
         ? `&sbatimin=${Math.round(surf * 0.65)}&sbatimax=${Math.round(surf * 1.35)}`
         : "";
-      const dvfRes = await fetch(
+      const dvfRes = await fetchWithRetry(
         `https://apidf-preprod.cerema.fr/dvf_opendata/mutations/?code_insee=${codeInsee}&libnatmut=Vente&limit=20${surfParams}`
       );
       if (!dvfRes.ok) throw new Error(`DVF API HTTP ${dvfRes.status}`);
