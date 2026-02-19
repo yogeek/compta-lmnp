@@ -29,6 +29,42 @@ const schema = z
 
 type FormData = z.infer<typeof schema>;
 
+// ─── Situation fiscale ──────────────────────────────────────────────────────
+
+type Situation = "" | "recent" | "converted" | "regime_change";
+
+const SITUATIONS: {
+  key: Situation;
+  short: string;
+  title: string;
+  value: string;
+  disables: string[];
+}[] = [
+  {
+    key: "recent",
+    short: "Achat direct",
+    title: "Achat récent, mis en location meublée aussitôt",
+    value: "Prix figurant dans l'acte notarié. Les frais de notaire et d'agence sont saisibles séparément dans la décomposition ci-dessous.",
+    disables: [],
+  },
+  {
+    key: "converted",
+    short: "Bien converti",
+    title: "Bien anciennement loué nu ou occupé en RP, converti en LMNP",
+    value: "Valeur vénale à la date de première mise en location meublée (pas le prix d'achat historique). Les frais d'acquisition de l'acte original ne sont pas capitalisables.",
+    disables: ["acquisition_costs"],
+  },
+  {
+    key: "regime_change",
+    short: "Micro → Réel",
+    title: "Passage du régime Micro-BIC au régime réel",
+    value: "Valeur retenue lors de l'immatriculation LMNP initiale. Les frais d'acquisition ne s'appliquent pas à cette valeur de bascule.",
+    disables: ["acquisition_costs"],
+  },
+];
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 function formatEuro(v: number) {
   return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
 }
@@ -37,13 +73,13 @@ function formatPct(v: number) {
   return `${v.toFixed(1)} %`;
 }
 
-// ─── Price context helpers ─────────────────────────────────────────────────
-
 function parseAddress(address: string): { commune: string; codePostal: string } {
   const match = address.match(/(\d{5})\s+([A-Za-zÀ-ÿ\s'-]+?)(?:[,\s]|$)/);
   if (match) return { codePostal: match[1], commune: match[2].trim() };
   return { commune: "", codePostal: "" };
 }
+
+// ─── DVF types ──────────────────────────────────────────────────────────────
 
 interface DvfMutation {
   datemut: string;
@@ -58,12 +94,28 @@ interface DvfApiResponse {
   results: DvfMutation[];
 }
 
-function PriceContextPanel({ address }: { address: string }) {
+type SortCol = "date" | "surface" | "prix" | "prixm2";
+
+// ─── PriceContextPanel ──────────────────────────────────────────────────────
+
+function PriceContextPanel({
+  address,
+  situation,
+  onSituationChange,
+}: {
+  address: string;
+  situation: Situation;
+  onSituationChange: (s: Situation) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dvfLoading, setDvfLoading] = useState(false);
   const [dvfResults, setDvfResults] = useState<DvfMutation[] | null>(null);
   const [dvfError, setDvfError] = useState("");
+  const [surfaceInput, setSurfaceInput] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [sortState, setSortState] = useState<{ col: SortCol; dir: "asc" | "desc" }>({ col: "date", dir: "desc" });
+  const [showTable, setShowTable] = useState(true);
 
   const { commune, codePostal } = parseAddress(address);
 
@@ -79,6 +131,7 @@ function PriceContextPanel({ address }: { address: string }) {
     setDvfLoading(true);
     setDvfError("");
     setDvfResults(null);
+    setShowTable(true);
     try {
       // Step 1: resolve postal code → INSEE commune code via geo.api.gouv.fr
       const geoRes = await fetch(
@@ -99,9 +152,13 @@ function PriceContextPanel({ address }: { address: string }) {
         codeInsee = `751${String(arrNum).padStart(2, "0")}`;
       }
 
-      // Step 2: query CEREMA DVF mutations API with INSEE code
+      // Step 2: query CEREMA DVF mutations API with INSEE code + optional surface range
+      const surf = parseFloat(surfaceInput);
+      const surfParams = surf > 0
+        ? `&sbatimin=${Math.round(surf * 0.65)}&sbatimax=${Math.round(surf * 1.35)}`
+        : "";
       const dvfRes = await fetch(
-        `https://apidf-preprod.cerema.fr/dvf_opendata/mutations/?code_insee=${codeInsee}&libnatmut=Vente&limit=15`
+        `https://apidf-preprod.cerema.fr/dvf_opendata/mutations/?code_insee=${codeInsee}&libnatmut=Vente&limit=20${surfParams}`
       );
       if (!dvfRes.ok) throw new Error(`DVF API HTTP ${dvfRes.status}`);
       const data: DvfApiResponse = await dvfRes.json();
@@ -112,6 +169,42 @@ function PriceContextPanel({ address }: { address: string }) {
       setDvfLoading(false);
     }
   };
+
+  // Client-side filtering + sorting
+  const surf = parseFloat(surfaceInput);
+  const filteredResults = (dvfResults ?? [])
+    .filter((m) => {
+      const s = parseFloat(m.sbati);
+      const v = parseFloat(m.valeurfonc);
+      if (s <= 0 || v <= 0) return false;
+      if (typeFilter && !m.libtypbien.toLowerCase().includes(typeFilter)) return false;
+      // Safety-net surface filter in case API doesn't support sbatimin/sbatimax
+      if (surf > 0 && (s < surf * 0.65 || s > surf * 1.35)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dir = sortState.dir === "asc" ? 1 : -1;
+      switch (sortState.col) {
+        case "date": return dir * (a.datemut > b.datemut ? 1 : -1);
+        case "surface": return dir * (parseFloat(a.sbati) - parseFloat(b.sbati));
+        case "prix": return dir * (parseFloat(a.valeurfonc) - parseFloat(b.valeurfonc));
+        case "prixm2": return dir * (
+          parseFloat(a.valeurfonc) / parseFloat(a.sbati) -
+          parseFloat(b.valeurfonc) / parseFloat(b.sbati)
+        );
+        default: return 0;
+      }
+    });
+
+  const handleSort = (col: SortCol) => {
+    setSortState((prev) => ({
+      col,
+      dir: prev.col === col ? (prev.dir === "asc" ? "desc" : "asc") : "desc",
+    }));
+  };
+
+  const sortIcon = (col: SortCol) =>
+    sortState.col === col ? (sortState.dir === "asc" ? " ↑" : " ↓") : " ↕";
 
   const tools = [
     {
@@ -146,39 +239,61 @@ function PriceContextPanel({ address }: { address: string }) {
 
   return (
     <div className="mt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-800 font-medium"
-      >
-        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        Quel prix saisir ? · Estimer la valeur vénale
-      </button>
+      {/* Toggle button + situation badge when collapsed */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-800 font-medium"
+        >
+          {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          Quel prix saisir ? · Estimer la valeur vénale
+        </button>
+        {situation && (
+          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+            <CheckCircle className="w-3 h-3" />
+            {SITUATIONS.find((s) => s.key === situation)?.short}
+          </span>
+        )}
+      </div>
 
       {open && (
         <div className="mt-2 rounded-xl border border-indigo-200 bg-indigo-50 p-4 space-y-4">
 
-          {/* Scenario guide */}
+          {/* Situation selector — clickable radio cards */}
           <div>
-            <p className="text-xs font-semibold text-indigo-900 mb-2">Quel prix utiliser selon votre situation ?</p>
+            <p className="text-xs font-semibold text-indigo-900 mb-2">
+              Sélectionnez votre situation pour adapter la décomposition patrimoniale :
+            </p>
             <div className="space-y-2">
-              {[
-                {
-                  title: "Achat récent, mis en location meublée aussitôt",
-                  value: "→ Prix figurant dans l'acte notarié (hors frais notaire et agence à saisir séparément).",
-                },
-                {
-                  title: "Bien anciennement loué nu ou occupé en RP, converti en LMNP",
-                  value: "→ Valeur vénale du bien à la date de première mise en location meublée (pas le prix d'achat historique). Cette valeur doit être estimée.",
-                },
-                {
-                  title: "Passage du régime Micro-BIC au régime réel",
-                  value: "→ Valeur retenue lors de l'immatriculation initiale en LMNP (généralement la date de première mise en location meublée).",
-                },
-              ].map((s, i) => (
-                <div key={i} className="bg-white rounded-lg border border-indigo-100 p-2.5 text-xs">
-                  <p className="font-medium text-indigo-800 mb-0.5">{s.title}</p>
-                  <p className="text-gray-600">{s.value}</p>
+              {SITUATIONS.map((s) => (
+                <div
+                  key={s.key}
+                  onClick={() => onSituationChange(situation === s.key ? "" : s.key)}
+                  className={`rounded-lg border p-2.5 text-xs cursor-pointer transition-all ${
+                    situation === s.key
+                      ? "bg-indigo-100 border-indigo-400 ring-1 ring-indigo-400"
+                      : "bg-white border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/60"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {/* Radio circle */}
+                    <div className={`w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center ${
+                      situation === s.key ? "border-indigo-500 bg-indigo-500" : "border-gray-300 bg-white"
+                    }`}>
+                      {situation === s.key && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
+                    <div>
+                      <p className="font-medium text-indigo-800 mb-0.5">{s.title}</p>
+                      <p className="text-gray-600">{s.value}</p>
+                      {s.disables.length > 0 && situation === s.key && (
+                        <p className="text-amber-700 mt-1 flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                          Les frais d'acquisition seront désactivés dans la décomposition ci-dessous.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -217,16 +332,43 @@ function PriceContextPanel({ address }: { address: string }) {
               </p>
             ) : (
               <>
-                {!dvfResults && !dvfLoading && (
+                {/* Search filters */}
+                <div className="flex flex-wrap gap-2 items-end mb-2">
+                  <div>
+                    <label className="block text-xs text-indigo-700 font-medium mb-1">Surface (m²)</label>
+                    <input
+                      type="number"
+                      value={surfaceInput}
+                      onChange={(e) => setSurfaceInput(e.target.value)}
+                      placeholder="ex : 65"
+                      className="form-input w-24 py-1 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-indigo-700 font-medium mb-1">Type de bien</label>
+                    <select
+                      value={typeFilter}
+                      onChange={(e) => setTypeFilter(e.target.value)}
+                      className="form-input py-1 text-xs"
+                    >
+                      <option value="">Tous</option>
+                      <option value="appartement">Appartement</option>
+                      <option value="maison">Maison</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={fetchDvf}
+                    disabled={dvfLoading}
                     className="flex items-center gap-1.5 text-xs btn-secondary py-1.5"
                   >
                     <Search className="w-3.5 h-3.5" />
-                    Rechercher les ventes récentes à {commune || codePostal}
+                    {dvfLoading
+                      ? "Chargement…"
+                      : `Rechercher${surf > 0 ? ` ~${surfaceInput} m²` : ""} à ${commune || codePostal}`}
                   </button>
-                )}
+                </div>
+
                 {dvfLoading && (
                   <div className="text-xs text-indigo-500 flex items-center gap-2">
                     <div className="animate-spin w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full" />
@@ -234,54 +376,86 @@ function PriceContextPanel({ address }: { address: string }) {
                   </div>
                 )}
                 {dvfError && <p className="text-xs text-red-600">{dvfError}</p>}
-                {dvfResults && dvfResults.length === 0 && (
+                {dvfResults !== null && filteredResults.length === 0 && !dvfLoading && (
                   <p className="text-xs text-gray-500">
-                    Pas de données DVF disponibles pour cette commune (couverture CEREMA limitée). Consultez les outils ci-dessous.
+                    {dvfResults.length === 0
+                      ? "Pas de données DVF disponibles pour cette commune (couverture CEREMA limitée). Consultez les outils ci-dessous."
+                      : `Aucune transaction correspondant aux filtres (${dvfResults.length} transaction(s) au total dans la commune).`}
                   </p>
                 )}
-                {dvfResults && dvfResults.length > 0 && (
+                {filteredResults.length > 0 && (
                   <div>
-                    <p className="text-xs text-indigo-600 mb-2">
-                      {dvfResults.filter((m) => parseFloat(m.sbati) > 0 && parseFloat(m.valeurfonc) > 0).length} transaction(s) — {commune || codePostal} — données DVF
-                    </p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-indigo-100 text-indigo-700">
-                            <th className="text-left px-2 py-1.5 font-medium">Type</th>
-                            <th className="text-left px-2 py-1.5 font-medium">Date</th>
-                            <th className="text-right px-2 py-1.5 font-medium">Surface</th>
-                            <th className="text-right px-2 py-1.5 font-medium">Prix</th>
-                            <th className="text-right px-2 py-1.5 font-medium">€/m²</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dvfResults
-                            .filter((m) => parseFloat(m.sbati) > 0 && parseFloat(m.valeurfonc) > 0)
-                            .map((m, i) => {
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs text-indigo-600">
+                        {filteredResults.length} transaction(s) — {commune || codePostal}
+                        {surf > 0 && ` · ±35 % autour de ${surfaceInput} m²`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowTable((v) => !v)}
+                        className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700"
+                      >
+                        {showTable ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {showTable ? "Masquer" : "Afficher"} le tableau
+                      </button>
+                    </div>
+                    {showTable && (
+                      <div className="overflow-x-auto rounded-lg border border-indigo-100">
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-indigo-100 text-indigo-700 select-none">
+                              <th className="text-left px-2 py-1.5 font-medium">Type</th>
+                              <th
+                                className="text-left px-2 py-1.5 font-medium cursor-pointer hover:bg-indigo-200"
+                                onClick={() => handleSort("date")}
+                              >
+                                Date{sortIcon("date")}
+                              </th>
+                              <th
+                                className="text-right px-2 py-1.5 font-medium cursor-pointer hover:bg-indigo-200"
+                                onClick={() => handleSort("surface")}
+                              >
+                                Surface{sortIcon("surface")}
+                              </th>
+                              <th
+                                className="text-right px-2 py-1.5 font-medium cursor-pointer hover:bg-indigo-200"
+                                onClick={() => handleSort("prix")}
+                              >
+                                Prix{sortIcon("prix")}
+                              </th>
+                              <th
+                                className="text-right px-2 py-1.5 font-medium cursor-pointer hover:bg-indigo-200"
+                                onClick={() => handleSort("prixm2")}
+                              >
+                                €/m²{sortIcon("prixm2")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredResults.map((m, i) => {
                               const prix = parseFloat(m.valeurfonc);
-                              const surf = parseFloat(m.sbati);
+                              const sfm = parseFloat(m.sbati);
                               return (
-                              <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-indigo-50/50"}>
-                                <td className="px-2 py-1.5 text-gray-600">{m.libtypbien}</td>
-                                <td className="px-2 py-1.5 text-gray-600">
-                                  {new Date(m.datemut).toLocaleDateString("fr-FR", { month: "short", year: "numeric" })}
-                                </td>
-                                <td className="px-2 py-1.5 text-right">{surf} m²</td>
-                                <td className="px-2 py-1.5 text-right font-medium">
-                                  {formatEuro(prix)}
-                                </td>
-                                <td className="px-2 py-1.5 text-right text-indigo-700 font-medium">
-                                  {formatEuro(prix / surf)}/m²
-                                </td>
-                              </tr>
+                                <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-indigo-50/50"}>
+                                  <td className="px-2 py-1.5 text-gray-600">{m.libtypbien}</td>
+                                  <td className="px-2 py-1.5 text-gray-600">
+                                    {new Date(m.datemut).toLocaleDateString("fr-FR", { month: "short", year: "numeric" })}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right">{sfm} m²</td>
+                                  <td className="px-2 py-1.5 text-right font-medium">{formatEuro(prix)}</td>
+                                  <td className="px-2 py-1.5 text-right text-indigo-700 font-medium">
+                                    {formatEuro(prix / sfm)}/m²
+                                  </td>
+                                </tr>
                               );
                             })}
-                        </tbody>
-                      </table>
-                    </div>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                     <p className="text-xs text-gray-400 mt-1.5">
                       Source : Demandes de Valeurs Foncières (DVF) — données officielles de l'État français.
+                      {surf === 0 && " Saisissez la surface pour affiner les résultats."}
                     </p>
                   </div>
                 )}
@@ -322,7 +496,8 @@ function PriceContextPanel({ address }: { address: string }) {
   );
 }
 
-// Visual breakdown bar
+// ─── Visual breakdown bar ────────────────────────────────────────────────────
+
 function BreakdownBar({
   total, land, building, furniture, costs,
 }: { total: number; land: number; building: number; furniture: number; costs: number }) {
@@ -389,18 +564,22 @@ function BreakdownBar({
   );
 }
 
-// Patrimonial decomposition with % / € toggle
+// ─── Patrimonial decomposition ───────────────────────────────────────────────
+
 interface DecompositionProps {
   totalPrice: number;
   register: ReturnType<typeof useForm<FormData>>["register"];
   setValue: ReturnType<typeof useForm<FormData>>["setValue"];
   watch: ReturnType<typeof useForm<FormData>>["watch"];
   errors: ReturnType<typeof useForm<FormData>>["formState"]["errors"];
+  situation: Situation;
 }
 
-function PatrimonialDecomposition({ totalPrice, register, setValue, watch, errors }: DecompositionProps) {
+function PatrimonialDecomposition({ totalPrice, register, setValue, watch, errors, situation }: DecompositionProps) {
   const [pctMode, setPctMode] = useState(false);
   const [pctValues, setPctValues] = useState({ land: "", building: "", furniture: "", costs: "" });
+
+  const costsDisabled = situation === "converted" || situation === "regime_change";
 
   const watched = {
     land: watch("land_value") || 0,
@@ -413,14 +592,21 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
   const remaining = totalPrice > 0 ? totalPrice - allocated : 0;
   const landPct = totalPrice > 0 ? (watched.land / totalPrice) * 100 : 0;
 
-  // When switching to % mode, convert current € to %
+  // Reset acquisition_costs when situation disables it
+  useEffect(() => {
+    if (costsDisabled) {
+      setValue("acquisition_costs", 0, { shouldValidate: true });
+      setPctValues((prev) => ({ ...prev, costs: "" }));
+    }
+  }, [costsDisabled, setValue]);
+
   const toggleMode = () => {
     if (!pctMode && totalPrice > 0) {
       setPctValues({
         land: watched.land > 0 ? ((watched.land / totalPrice) * 100).toFixed(1) : "",
         building: watched.building > 0 ? ((watched.building / totalPrice) * 100).toFixed(1) : "",
         furniture: watched.furniture > 0 ? ((watched.furniture / totalPrice) * 100).toFixed(1) : "",
-        costs: watched.costs > 0 ? ((watched.costs / totalPrice) * 100).toFixed(1) : "",
+        costs: watched.costs > 0 && !costsDisabled ? ((watched.costs / totalPrice) * 100).toFixed(1) : "",
       });
     }
     setPctMode((m) => !m);
@@ -441,6 +627,22 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
     }
   };
 
+  // Fill the remaining unallocated amount into a given field
+  const fillRemaining = (
+    key: keyof typeof pctValues,
+    formField: "land_value" | "building_value" | "furniture_value" | "acquisition_costs"
+  ) => {
+    const currentVal = watch(formField) || 0;
+    const newVal = Math.round((currentVal + remaining) * 100) / 100;
+    setValue(formField, newVal, { shouldValidate: true });
+    if (pctMode && totalPrice > 0) {
+      setPctValues((prev) => ({
+        ...prev,
+        [key]: ((newVal / totalPrice) * 100).toFixed(1),
+      }));
+    }
+  };
+
   const fields = [
     {
       key: "land" as const,
@@ -449,6 +651,7 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
       tooltip: "La valeur du terrain n'est jamais amortissable. Elle doit être estimée avec soin : une valeur trop faible peut être contestée par le fisc.",
       cgiRef: "CGI art. 39 C",
       color: "bg-amber-100 border-amber-300",
+      disabled: false,
     },
     {
       key: "building" as const,
@@ -457,6 +660,7 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
       tooltip: "Valeur amortissable du bâti. En général : prix total − terrain − mobilier − frais. Amortissable sur 50 ans minimum.",
       cgiRef: "CGI art. 39 A",
       color: "bg-blue-50 border-blue-200",
+      disabled: false,
     },
     {
       key: "furniture" as const,
@@ -465,14 +669,18 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
       tooltip: "Valeur des meubles et équipements. Amortissable sur 5 à 10 ans. Doit être justifiable par des factures.",
       cgiRef: "CGI art. 39 A",
       color: "bg-purple-50 border-purple-200",
+      disabled: false,
     },
     {
       key: "costs" as const,
       field: "acquisition_costs" as const,
       label: "Frais d'acquisition",
-      tooltip: "Honoraires notaire, frais d'agence, droits de mutation. Amortissables sur 5 ans en option (ou déductibles en charge l'année d'acquisition).",
-      cgiRef: "CGI art. 39 quinquies",
-      color: "bg-green-50 border-green-200",
+      tooltip: costsDisabled
+        ? "Non applicable : la valeur vénale à la date d'immatriculation LMNP ne comprend pas les frais d'acquisition de l'acte original."
+        : "Honoraires notaire, frais d'agence, droits de mutation. Amortissables sur 5 ans en option (ou déductibles en charge l'année d'acquisition).",
+      cgiRef: costsDisabled ? undefined : "CGI art. 39 quinquies",
+      color: costsDisabled ? "bg-gray-50 border-gray-200" : "bg-green-50 border-green-200",
+      disabled: costsDisabled,
     },
   ];
 
@@ -493,10 +701,15 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {fields.map(({ key, field, label, tooltip, cgiRef, color }) => (
-          <div key={field} className={`rounded-lg border p-3 ${color}`}>
+        {fields.map(({ key, field, label, tooltip, cgiRef, color, disabled }) => (
+          <div key={field} className={`rounded-lg border p-3 ${color} ${disabled ? "opacity-60" : ""}`}>
             <LabelWithTooltip label={label} tooltip={tooltip} cgiRef={cgiRef} side="right" />
-            {pctMode && totalPrice > 0 ? (
+
+            {disabled ? (
+              <div className="form-input bg-gray-100 text-gray-400 cursor-not-allowed text-sm select-none">
+                Non applicable
+              </div>
+            ) : pctMode && totalPrice > 0 ? (
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input
@@ -527,11 +740,25 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">€</span>
               </div>
             )}
-            {totalPrice > 0 && (watch(field) || 0) > 0 && !pctMode && (
+
+            {!disabled && totalPrice > 0 && (watch(field) || 0) > 0 && !pctMode && (
               <p className="text-xs text-gray-400 mt-1">
                 = {formatPct(((watch(field) || 0) / totalPrice) * 100)}
               </p>
             )}
+
+            {/* Fill-remaining button */}
+            {!disabled && remaining > 0.01 && totalPrice > 0 && (
+              <button
+                type="button"
+                onClick={() => fillRemaining(key, field)}
+                className="mt-1.5 text-xs text-primary-600 hover:text-primary-800 font-medium flex items-center gap-0.5 leading-tight"
+                title={`Affecter les ${formatEuro(remaining)} non ventilés à ce composant`}
+              >
+                ↑ Affecter le solde (+{formatEuro(remaining)})
+              </button>
+            )}
+
             {errors[field] && <p className="form-error">{errors[field]?.message}</p>}
           </div>
         ))}
@@ -575,12 +802,15 @@ function PatrimonialDecomposition({ totalPrice, register, setValue, watch, error
   );
 }
 
+// ─── Main Properties page ────────────────────────────────────────────────────
+
 export default function Properties() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Property | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [situation, setSituation] = useState<Situation>("");
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -606,6 +836,7 @@ export default function Properties() {
       await load();
       setShowForm(false);
       setEditing(null);
+      setSituation("");
       reset();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -615,6 +846,7 @@ export default function Properties() {
 
   const handleEdit = (p: Property) => {
     setEditing(p);
+    setSituation("");
     reset({
       name: p.name,
       address: p.address ?? "",
@@ -645,7 +877,12 @@ export default function Properties() {
           <p className="text-gray-500 mt-1">Gérez vos biens meublés loués</p>
         </div>
         <button
-          onClick={() => { setShowForm(true); setEditing(null); reset({ land_value: 0, building_value: 0, furniture_value: 0, acquisition_costs: 0, total_price: 0 }); }}
+          onClick={() => {
+            setShowForm(true);
+            setEditing(null);
+            setSituation("");
+            reset({ land_value: 0, building_value: 0, furniture_value: 0, acquisition_costs: 0, total_price: 0 });
+          }}
           className="btn-primary"
         >
           <Plus className="w-4 h-4" /> Ajouter un bien
@@ -692,7 +929,11 @@ export default function Properties() {
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">€</span>
               </div>
               {errors.total_price && <p className="form-error">{errors.total_price.message}</p>}
-              <PriceContextPanel address={watchedAddress} />
+              <PriceContextPanel
+                address={watchedAddress}
+                situation={situation}
+                onSituationChange={setSituation}
+              />
             </div>
             <div className="max-w-xs">
               <LabelWithTooltip
@@ -708,11 +949,16 @@ export default function Properties() {
               setValue={setValue}
               watch={watch}
               errors={errors}
+              situation={situation}
             />
 
             <div className="flex gap-3 pt-2">
               <button type="submit" className="btn-primary">{editing ? "Enregistrer" : "Créer"}</button>
-              <button type="button" onClick={() => { setShowForm(false); setEditing(null); }} className="btn-secondary">
+              <button
+                type="button"
+                onClick={() => { setShowForm(false); setEditing(null); setSituation(""); }}
+                className="btn-secondary"
+              >
                 Annuler
               </button>
             </div>
@@ -735,7 +981,6 @@ export default function Properties() {
             const landTooLow = landPct > 0 && landPct < 15 && p.total_price > 0;
             const decompositionIncomplete = p.total_price > 0 && !isComplete && allocated < p.total_price - 1;
 
-            // Collect card-level warnings
             const warnings: string[] = [];
             if (landTooLow)
               warnings.push(`Terrain à ${formatPct(landPct)} du prix total — valeur inférieure à 15 % potentiellement contestable (CGI art. 39 C).`);
@@ -800,7 +1045,6 @@ export default function Properties() {
                   />
                 )}
 
-                {/* Warning banners — expanded, actionable */}
                 {warnings.length > 0 && (
                   <div className="mt-3 space-y-1.5">
                     {warnings.map((w, i) => (
